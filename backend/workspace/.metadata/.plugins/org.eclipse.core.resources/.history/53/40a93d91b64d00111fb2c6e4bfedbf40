@@ -1,0 +1,147 @@
+package com.example.demo;
+
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpResponse;
+import java.util.List;
+import java.net.http.HttpRequest;
+
+import org.json.JSONArray;
+import org.json.JSONObject;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RestController;
+
+
+@RestController
+@CrossOrigin(origins = "http://localhost:3000") // ★나중에 React랑 연결할 때 필수 설정!
+public class ReactController {
+	
+	@Autowired
+	private BoardRepository boardRepository;
+
+	  @GetMapping("/api/board")
+	    public List<Board> getBoardList() {
+	    
+		  // DB에 있는 모든 데이터를 가져와서 리턴합니다!
+		  return boardRepository.findAll();
+    }
+	  
+	  @PostMapping("/api/board")
+	  	public Board createBoard(@RequestBody Board board) {
+		  // @RequestBody는 리액트가 보낸 JSON 데이터를 Board 객체로 자동 변환해줍니다. 
+		  return boardRepository.save(board);	  
+	  }
+	  
+	  @DeleteMapping("/api/board/{id}") // 
+	  public void deleteBoard(@PathVariable("id") Long id) { 
+	      System.out.println("삭제 요청 들어옴! ID: " + id); // ★ 이 로그가 찍히는지 먼저 확인!
+	      boardRepository.deleteById(id);
+	  }
+	  
+	  @PutMapping("/api/board/{id}") // 수정을 의미하는 PUT 방식
+	  public Board updateBoard(@PathVariable("id") Long id, @RequestBody Board boardDetails) {
+	      // 1. 기존 데이터를 찾습니다.
+	      Board board = boardRepository.findById(id)
+	              .orElseThrow(() -> new RuntimeException("해당 글이 없습니다. id=" + id));
+	      
+	      // 2. 내용을 고칩니다.
+	      board.setTitle(boardDetails.getTitle());
+	      board.setContent(boardDetails.getContent());
+	      board.setAuthor(boardDetails.getAuthor());
+	      
+	      // 3. 다시 저장 (JPA가 UPDATE 문을 실행함)
+	      return boardRepository.save(board);
+	  }
+	  
+	  //컨텐츠 내용 가져오기
+	  public static class AIRequest{
+		  public String content;
+	  }
+	  
+	  //ai 보내기
+	  public static class AiResponse{
+		  public String analysis;
+		  public AiResponse(String analysis) {this.analysis = analysis;}
+	  }
+	  
+	  @PostMapping("/api/board/analyze")
+	  public AiResponse analyzeCode(@RequestBody AIRequest request) {
+		String apiKey = "AIzaSyC4JuzLHyoaF_EtndRIWHBvRPzvBBPubEQ"; 
+		 // ★ 이 주소 전체를 복사해서 넣으세요! ★
+	    // 단순히 googleapis.com 뒤에 키를 붙이는 게 아니라, 아래처럼 긴 경로가 다 필요합니다.
+	    String url = "https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=" + apiKey;
+		System.out.println("url 주소 : " + url);
+		
+		try {
+			// AI에게 줄 질문 구성 (프롬프트 엔지니어링)
+			//String jsonBody = "{\"contents\":[{\"parts\":[{\"text\":\"" + request.content.replace("\"", "\\\"").replace("\n", "\\n") + " 이 코드를 분석해서 버그를 찾고 3줄 요약해줘.\"}]}]}";
+			//String prompt = "다음 코드를 분석해서 버그가 있다면 찾아주고, 개선 방향을 3줄 요약해줘:" + request.content; 
+			
+			// 1. 구글이 요구하는 엄격한 JSON 구조 만들기
+			JSONObject jsonBody = new JSONObject();
+	        JSONArray contents = new JSONArray();
+	        JSONObject contentObj = new JSONObject();
+	        JSONArray parts = new JSONArray();
+	        JSONObject partObj = new JSONObject();
+
+	        partObj.put("text", "다음 코드를 분석해서 개선점을 알려줘: " + request.content);
+	        parts.put(partObj);
+	        contentObj.put("parts", parts);
+	        contents.put(contentObj);
+	        jsonBody.put("contents", contents);
+	        
+	     
+	       
+	        // HTTP 요청 전송
+	        HttpClient client = HttpClient.newHttpClient();
+	        HttpRequest httpRequest =  (HttpRequest) HttpRequest.newBuilder()
+	        		.uri(URI.create(url))
+	                .header("Content-Type", "application/json")
+	                .POST(HttpRequest.BodyPublishers.ofString(jsonBody.toString()))
+	                .build();
+	        
+	        HttpResponse<String> response = client.send(httpRequest, HttpResponse.BodyHandlers.ofString());
+	          
+	        if(response.equals(null)) {
+	        	System.out.println("구글에서 요청이 오지 않습니다.");
+	        	 return new AiResponse("구글 ai가 요청이 오지 않습니다.");
+	        }
+	        
+	        // 4. 상태 코드 확인 (429 에러 처리 추가)
+	        int statusCode = response.statusCode();
+	        if (statusCode == 429) {
+	            System.out.println("⚠️ [경고] 구글 API 요청 한도 초과 (429 에러 발생!)");
+	            System.out.println("응답 내용: " + response.body());
+	            return new AiResponse("🤖 AI 요청이 너무 많습니다. 구글 API 요청 한도 초과. (429)");
+	        }
+	     	        
+	        // 2. 응답이 비어있는지 확인
+	        if (response.body() == null || response.body().isEmpty()) {
+	            return new AiResponse("🤖 AI 응답이 비어있습니다.");
+	        }
+	        
+	        // 결과에서 텍스트 추출
+	        JSONObject resJson = new JSONObject(response.body());
+	        String aiText = resJson.getJSONArray("candidates")
+	                .getJSONObject(0)
+	                .getJSONObject("content")
+	                .getJSONArray("parts")
+	                .getJSONObject(0)
+	                .getString("text");
+
+	        return new AiResponse(aiText);
+
+	    } catch (Exception e) {
+	        e.printStackTrace();
+	        return new AiResponse("🤖 AI 서비스 일시 중단: " + e.getMessage());
+	    }  
+		
+	  }
+}

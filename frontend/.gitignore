@@ -1,0 +1,12 @@
+# React node_modules 및 빌드 파일 제외
+frontend/node_modules/
+frontend/build/
+frontend/.env
+
+# Java/Eclipse/Spring 빌드 및 설정 파일 제외
+backend/bin/
+backend/build/
+backend/.gradle/
+backend/.settings/
+backend/.classpath
+backend/.project
